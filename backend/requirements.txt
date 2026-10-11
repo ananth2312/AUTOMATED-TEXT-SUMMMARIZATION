@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend Dependencies — Academic Research Summarizer
+# Install: pip install -r requirements.txt
+# Tested with Python 3.12
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# Settings and validation
+pydantic==2.10.3
+pydantic-settings==2.6.1
+pydantic[email]
+
+# Database
+pymongo==4.10.1
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Multipart form / file uploads
+python-multipart==0.0.18
+
+# PDF processing
+PyMuPDF==1.24.14
+
+# NLP
+nltk==3.9.1
+yake==0.4.8
+# spaCy is optional – uncomment if you want spaCy-based sentence splitting:
+# spacy==3.8.2
+
+# Export
+reportlab==4.2.5
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx==0.27.2        # async test client for FastAPI
+
+# Utilities
+python-dotenv==1.0.1  # used by pydantic-settings for .env support
