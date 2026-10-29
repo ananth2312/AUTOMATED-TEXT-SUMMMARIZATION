@@ -7,8 +7,11 @@
 
 import axios from 'axios'
 
+const rawBase = (import.meta.env.VITE_API_BASE_URL || '/api').trim().replace(/\/+$/, '')
+const baseURL = rawBase.endsWith('/api') ? rawBase : `${rawBase}/api`
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL,
   timeout: 60000,   // 60s – analysis can take a few seconds
 })
 
