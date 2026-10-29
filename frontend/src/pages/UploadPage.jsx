@@ -1,13 +1,13 @@
 // src/pages/UploadPage.jsx
 // ──────────────────────────
-// Upload PDF or paste text for analysis.
+// Upload PDF, import via arXiv/DOI, or paste text for analysis.
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import {
-  AlertCircle, CheckCircle, FileText, Loader2,
-  Type, Upload, X,
+  AlertCircle, BookMarked, CheckCircle, ExternalLink, FileText,
+  Globe, Info, Loader2, Sparkles, Type, Upload, X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { analysesApi, documentsApi } from '../services/api'
@@ -19,18 +19,27 @@ const SUMMARY_TYPES = [
   { value: 'detailed', label: 'Detailed', desc: 'Comprehensive (~50% of sentences)' },
 ]
 
+const SAMPLE_PAPERS = [
+  { label: 'Attention Is All You Need', id: '1706.03762' },
+  { label: 'BERT (Devlin et al.)', id: '1810.04805' },
+  { label: 'LoRA (Hu et al.)', id: '2106.09685' },
+]
+
 const MAX_BYTES = 20 * 1024 * 1024  // 20 MB
 
 export default function UploadPage() {
   const navigate = useNavigate()
-  const [mode,        setMode]        = useState('pdf')   // 'pdf' | 'text'
-  const [file,        setFile]        = useState(null)
-  const [text,        setText]        = useState('')
-  const [title,       setTitle]       = useState('')
-  const [summaryType, setSummaryType] = useState('medium')
-  const [loading,     setLoading]     = useState(false)
-  const [error,       setError]       = useState(null)
-  const [progress,    setProgress]    = useState('')
+  const [mode,            setMode]            = useState('pdf')   // 'pdf' | 'arxiv' | 'text'
+  const [file,            setFile]            = useState(null)
+  const [externalInput,   setExternalInput]   = useState('')
+  const [previewMeta,     setPreviewMeta]     = useState(null)
+  const [previewLoading,  setPreviewLoading]  = useState(false)
+  const [text,            setText]            = useState('')
+  const [title,           setTitle]           = useState('')
+  const [summaryType,     setSummaryType]     = useState('medium')
+  const [loading,         setLoading]         = useState(false)
+  const [error,           setError]           = useState(null)
+  const [progress,        setProgress]        = useState('')
 
   const onDrop = useCallback(accepted => {
     const f = accepted[0]
@@ -50,15 +59,51 @@ export default function UploadPage() {
     onDrop, accept: { 'application/pdf': ['.pdf'] }, maxFiles: 1,
   })
 
+  // Pre-fetch metadata for arXiv or DOI
+  const handleFetchPreview = async (overrideInput) => {
+    const target = (overrideInput || externalInput).trim()
+    if (!target) {
+      toast.error('Please enter an arXiv ID or DOI first.')
+      return
+    }
+    setPreviewLoading(true)
+    setError(null)
+    try {
+      const res = await documentsApi.previewExternal({ url_or_identifier: target })
+      setPreviewMeta(res.data)
+      if (res.data.title && !title) {
+        setTitle(res.data.title)
+      }
+      toast.success('Metadata fetched successfully!')
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Could not fetch metadata for this identifier.'
+      setError(msg)
+      toast.error(msg)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const handleSelectSample = (sampleId) => {
+    setExternalInput(sampleId)
+    handleFetchPreview(sampleId)
+  }
+
   const handleSubmit = async (ev) => {
     ev.preventDefault()
     setError(null)
 
     // Validate
-    if (!title.trim()) { setError('Please enter a document title.'); return }
-    if (mode === 'pdf' && !file) { setError('Please select a PDF file.'); return }
-    if (mode === 'text' && text.trim().length < 50) {
-      setError('Please paste at least 50 characters of text.'); return
+    if (mode === 'pdf') {
+      if (!file) { setError('Please select a PDF file.'); return }
+      if (!title.trim()) { setError('Please enter a document title.'); return }
+    } else if (mode === 'arxiv') {
+      if (!externalInput.trim()) { setError('Please enter an arXiv ID, URL, or DOI.'); return }
+    } else if (mode === 'text') {
+      if (!title.trim()) { setError('Please enter a document title.'); return }
+      if (text.trim().length < 50) {
+        setError('Please paste at least 50 characters of text.'); return
+      }
     }
 
     setLoading(true)
@@ -66,7 +111,6 @@ export default function UploadPage() {
       let analysisId
 
       if (mode === 'pdf') {
-        // Step 1: upload
         setProgress('Uploading PDF…')
         const fd = new FormData()
         fd.append('file', file)
@@ -74,10 +118,17 @@ export default function UploadPage() {
         const uploadRes = await documentsApi.upload(fd)
         const docId = uploadRes.data._id
 
-        // Step 2: analyse
         setProgress('Running NLP analysis…')
         const analysisRes = await analysesApi.analyzeDocument(docId, { summary_type: summaryType })
         analysisId = analysisRes.data._id
+      } else if (mode === 'arxiv') {
+        setProgress('Importing metadata & downloading PDF…')
+        const res = await documentsApi.importExternal({
+          url_or_identifier: externalInput.trim(),
+          summary_type: summaryType,
+          auto_analyze: true,
+        })
+        analysisId = res.data.analysis_id
       } else {
         setProgress('Running NLP analysis…')
         const res = await analysesApi.analyzeText({
@@ -104,15 +155,18 @@ export default function UploadPage() {
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold text-white">Analyse a Research Paper</h1>
-        <p className="text-slate-400 text-sm mt-1">Upload a PDF or paste text to get summaries and key phrases.</p>
+        <p className="text-slate-400 text-sm mt-1">
+          Upload a PDF, import directly via arXiv / DOI, or paste academic text for automated intelligence.
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Mode toggle */}
         <div className="card p-1 flex gap-1">
           {[
-            { v: 'pdf',  icon: Upload, label: 'Upload PDF' },
-            { v: 'text', icon: Type,   label: 'Paste Text' },
+            { v: 'pdf',   icon: Upload, label: 'Upload PDF' },
+            { v: 'arxiv', icon: Globe,  label: 'arXiv / DOI' },
+            { v: 'text',  icon: Type,   label: 'Paste Text' },
           ].map(({ v, icon: Icon, label }) => (
             <button
               key={v}
@@ -130,21 +184,23 @@ export default function UploadPage() {
           ))}
         </div>
 
-        {/* Title */}
-        <div>
-          <label className="label" htmlFor="doc-title">Document Title</label>
-          <input
-            id="doc-title"
-            type="text"
-            className="input"
-            placeholder="e.g. Attention Is All You Need"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            maxLength={300}
-          />
-        </div>
+        {/* Title (for PDF and Text mode, or optional override in arXiv mode) */}
+        {mode !== 'arxiv' && (
+          <div>
+            <label className="label" htmlFor="doc-title">Document Title</label>
+            <input
+              id="doc-title"
+              type="text"
+              className="input"
+              placeholder="e.g. Attention Is All You Need"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              maxLength={300}
+            />
+          </div>
+        )}
 
-        {/* PDF upload */}
+        {/* PDF upload mode */}
         {mode === 'pdf' && (
           <div>
             <label className="label">PDF File <span className="text-slate-500 font-normal">(max 20 MB)</span></label>
@@ -182,7 +238,86 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Text paste */}
+        {/* Direct arXiv / DOI mode */}
+        {mode === 'arxiv' && (
+          <div className="space-y-4">
+            <div>
+              <label className="label" htmlFor="arxiv-input">
+                arXiv ID, arXiv URL, or DOI
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="arxiv-input"
+                  type="text"
+                  className="input flex-1 font-mono text-sm"
+                  placeholder="e.g. 1706.03762 or 10.1145/3318464.3389700"
+                  value={externalInput}
+                  onChange={e => setExternalInput(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleFetchPreview()}
+                  disabled={previewLoading || !externalInput.trim()}
+                  className="btn btn-secondary flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  {previewLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-primary-400" />}
+                  Fetch Info
+                </button>
+              </div>
+
+              {/* Preset quick samples */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-xs text-slate-500">Quick examples:</span>
+                {SAMPLE_PAPERS.map(s => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleSelectSample(s.id)}
+                    className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 transition-colors"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Live Paper Preview Card */}
+            {previewMeta && (
+              <div className="card p-4 bg-slate-800/60 border-slate-700 space-y-3 animate-fade-in">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-primary-900/60 text-primary-300 border border-primary-700/50 mb-1.5">
+                      <BookMarked className="w-3 h-3" />
+                      {previewMeta.source.toUpperCase()} · {previewMeta.identifier}
+                    </span>
+                    <h3 className="text-base font-semibold text-white leading-snug">
+                      {previewMeta.title}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="text-xs text-slate-400 space-y-1">
+                  {previewMeta.authors?.length > 0 && (
+                    <p><span className="text-slate-500">Authors:</span> {previewMeta.authors.slice(0, 4).join(', ')}{previewMeta.authors.length > 4 ? ' et al.' : ''}</p>
+                  )}
+                  <div className="flex gap-4 text-slate-500">
+                    {previewMeta.year && <span>Year: <strong className="text-slate-300">{previewMeta.year}</strong></span>}
+                    {previewMeta.venue && <span>Venue: <strong className="text-slate-300">{previewMeta.venue}</strong></span>}
+                  </div>
+                </div>
+
+                {previewMeta.abstract && (
+                  <div className="text-xs text-slate-300 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 max-h-28 overflow-y-auto leading-relaxed">
+                    <p className="text-slate-500 font-medium mb-1">Abstract:</p>
+                    {previewMeta.abstract}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Text paste mode */}
         {mode === 'text' && (
           <div>
             <label className="label" htmlFor="paste-text">
@@ -223,7 +358,7 @@ export default function UploadPage() {
           </div>
         </div>
 
-        {/* Error */}
+        {/* Error notification */}
         {error && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-red-900/30 border border-red-800/50 text-red-300 text-sm">
             <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -231,7 +366,7 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Submit */}
+        {/* Submit Button */}
         <button
           id="analyse-submit"
           type="submit"
@@ -246,14 +381,13 @@ export default function UploadPage() {
           ) : (
             <>
               <CheckCircle className="w-4 h-4" />
-              Run Analysis
+              {mode === 'arxiv' ? 'Import & Run Analysis' : 'Run Analysis'}
             </>
           )}
         </button>
 
         <p className="text-xs text-slate-500 text-center leading-relaxed">
-          Results are generated by automated NLP algorithms. Please review the original
-          document before relying on or citing these outputs.
+          Extractive summaries and methodology findings are grounded directly in the paper's source text.
         </p>
       </form>
     </div>

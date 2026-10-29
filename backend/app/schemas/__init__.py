@@ -12,6 +12,8 @@ from .document import (
     DocumentListItem,
     DocumentListResponse,
     DocumentMetadata,
+    ExternalIngestRequest,
+    ExternalMetadataPreview,
     TextInputRequest,
 )
 from .analysis import (
@@ -31,8 +33,10 @@ __all__ = [
     "TokenResponse", "UserProfile", "UpdateProfileRequest", "ChangePasswordRequest",
     # document
     "DocumentMetadata", "DocumentListItem", "DocumentListResponse", "TextInputRequest",
+    "ExternalIngestRequest", "ExternalMetadataPreview",
     # analysis
     "AnalysisResult", "AnalysisListItem", "AnalysisListResponse",
     "AnalyzeDocumentRequest", "DashboardStats",
     "KeyPhrase", "DetectedSection", "DocumentStatistics",
 ]
+

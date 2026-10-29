@@ -14,6 +14,12 @@ from .methodology_extractor import (
 )
 from .keyword_extractor import ExtractedPhrase, extract_key_phrases
 from .statistics import compute_statistics
+from .citation_parser import (
+    ParsedReference,
+    extract_references_from_text,
+    detect_in_text_citations,
+    format_paper_self_citation,
+)
 
 __all__ = [
     "ExtractionResult", "extract_text_from_pdf",
@@ -27,4 +33,9 @@ __all__ = [
     "extract_methodology_and_findings",
     "ExtractedPhrase", "extract_key_phrases",
     "compute_statistics",
+    "ParsedReference",
+    "extract_references_from_text",
+    "detect_in_text_citations",
+    "format_paper_self_citation",
 ]
+

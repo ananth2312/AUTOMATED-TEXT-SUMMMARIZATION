@@ -13,23 +13,28 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, BarChart2, BookOpen, Check,
-  CheckCircle2, ChevronDown, ChevronRight, Copy, Download,
+  CheckCircle2, ChevronDown, ChevronRight, Columns, Copy, Download,
   ExternalLink, Eye, FileText, Key, Layers, Loader2,
   Quote, ShieldCheck, Sparkles, XCircle,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { analysesApi } from '../services/api'
 import clsx from 'clsx'
+import PdfReaderPanel from '../components/ui/PdfReaderPanel'
+import CitationsPanel from '../components/ui/CitationsPanel'
+import CitationPopover from '../components/ui/CitationPopover'
 
 const TABS = [
   { id: 'overview',    label: 'Overview',            icon: FileText },
   { id: 'summary',     label: 'Summary & Evidence',  icon: BookOpen },
   { id: 'methodology', label: 'Findings & Methods',  icon: Sparkles },
   { id: 'sections',    label: 'Section Summaries',   icon: Layers   },
+  { id: 'citations',   label: 'Citations & BibTeX',  icon: Quote    },
   { id: 'phrases',     label: 'Key Phrases',         icon: Key      },
   { id: 'stats',       label: 'Statistics',          icon: BarChart2 },
   { id: 'source',      label: 'Source',              icon: FileText },
 ]
+
 
 function CopyButton({ text, label = 'Copy' }) {
   const [copied, setCopied] = useState(false)
@@ -86,6 +91,8 @@ export default function AnalysisPage() {
   const [summaryViewMode, setSummaryViewMode] = useState('interactive') // 'interactive' | 'continuous'
   const [methodologyFilter, setMethodologyFilter] = useState('all') // 'all' | 'found' | 'not_stated'
   const [expandedSection, setExpandedSection] = useState(null)
+  const [splitView, setSplitView] = useState(false)
+  const [pdfPage, setPdfPage] = useState(1)
 
   useEffect(() => {
     analysesApi.get(analysisId)
@@ -98,8 +105,12 @@ export default function AnalysisPage() {
           || r.data.summary_sentences_with_evidence || []
         if (evList.length > 0) {
           setSelectedSentence(evList[0])
+          if (evList[0].page_number) {
+            setPdfPage(evList[0].page_number)
+          }
         }
       })
+
       .catch(() => setError('Analysis not found or access denied.'))
       .finally(() => setLoading(false))
   }, [analysisId])
@@ -187,7 +198,20 @@ export default function AnalysisPage() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            onClick={() => setSplitView(s => !s)}
+            className={clsx(
+              'btn btn-sm flex items-center gap-1.5 transition-all text-xs font-semibold',
+              splitView
+                ? 'bg-primary-600 text-white shadow-md shadow-primary-950/60 border border-primary-500'
+                : 'btn-secondary text-slate-300 hover:text-white',
+            )}
+            title="Toggle split-screen interactive PDF viewer"
+          >
+            <Columns className="w-3.5 h-3.5 text-primary-400" />
+            {splitView ? 'Exit Split View' : 'Split Reader View'}
+          </button>
           <ExportButton analysisId={analysisId} format="txt" />
           <ExportButton analysisId={analysisId} format="pdf" />
         </div>
@@ -230,13 +254,33 @@ export default function AnalysisPage() {
                 {a.section_summaries?.length || a.detected_sections?.length}
               </span>
             )}
+            {id === 'citations' && (a.citations?.total_references || 0) > 0 && (
+              <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-violet-500/20 text-violet-300 rounded-full border border-violet-500/30">
+                {a.citations.total_references}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
-      {/* ──────────────────────────────────────────────────────────── */}
-      {/* 1. OVERVIEW TAB */}
-      {/* ──────────────────────────────────────────────────────────── */}
+
+      {/* Interactive Split-Screen Reader & Tab Contents */}
+      <div className={clsx(splitView && 'grid grid-cols-1 lg:grid-cols-12 gap-6 items-start')}>
+        {splitView && (
+          <div className="lg:col-span-5 sticky top-20 z-20">
+            <PdfReaderPanel
+              documentId={a.document_id}
+              pageCount={stats.page_count || a.page_count || 1}
+              targetPage={pdfPage}
+              syncedSentence={selectedSentence}
+              sourceText={a.extracted_text || a.source_text_preview}
+            />
+          </div>
+        )}
+        <div className={clsx(splitView ? 'lg:col-span-7 space-y-6 min-w-0' : 'space-y-6')}>
+          {/* ──────────────────────────────────────────────────────────── */}
+          {/* 1. OVERVIEW TAB */}
+          {/* ──────────────────────────────────────────────────────────── */}
       {tab === 'overview' && (
         <div className="space-y-6">
           {/* Quick Metrics Grid */}
@@ -444,7 +488,10 @@ export default function AnalysisPage() {
                       return (
                         <div
                           key={idx}
-                          onClick={() => setSelectedSentence(item)}
+                          onClick={() => {
+                            setSelectedSentence(item)
+                            if (item.page_number) setPdfPage(item.page_number)
+                          }}
                           className={clsx(
                             'p-3.5 rounded-xl border text-sm transition-all cursor-pointer space-y-1.5',
                             isSelected
@@ -452,7 +499,7 @@ export default function AnalysisPage() {
                               : 'bg-slate-800/40 border-slate-800 hover:bg-slate-800/80 hover:border-slate-700 text-slate-300',
                           )}
                         >
-                          <div className="flex items-center justify-between text-[11px]">
+                          <div className="flex items-center justify-between text-[11px] flex-wrap gap-2">
                             <div className="flex items-center gap-2">
                               <span className={clsx(
                                 'font-mono px-2 py-0.5 rounded font-semibold',
@@ -463,16 +510,39 @@ export default function AnalysisPage() {
                               <span className="font-medium text-slate-400">
                                 Section: <strong className="text-slate-200 font-semibold">{item.section || 'Body'}</strong>
                               </span>
+                              <span className="font-mono px-2 py-0.5 rounded text-[10px] bg-slate-900 text-primary-300 border border-slate-700/80">
+                                Page {item.page_number || 1}
+                              </span>
                             </div>
-                            <span className="text-slate-400 font-mono">
-                              Score: {item.score?.toFixed?.(4) ?? item.score}
-                            </span>
+                            <div className="flex items-center gap-2.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedSentence(item)
+                                  if (item.page_number) setPdfPage(item.page_number)
+                                  setSplitView(true)
+                                }}
+                                className="text-[11px] text-primary-400 hover:text-primary-300 flex items-center gap-1 font-medium bg-primary-950/40 px-2 py-0.5 rounded border border-primary-800/40 hover:bg-primary-900/60 transition-all"
+                                title="Scroll PDF Reader to this evidence page"
+                              >
+                                <Columns className="w-3 h-3" /> View in Reader
+                              </button>
+                              <span className="text-slate-400 font-mono">
+                                Score: {item.score?.toFixed?.(4) ?? item.score}
+                              </span>
+                            </div>
                           </div>
                           <p className={clsx(
                             'leading-relaxed',
                             isSelected ? 'text-white font-medium' : 'text-slate-200',
                           )}>
-                            {item.text}
+                            <CitationPopover
+                              text={item.text}
+                              references={a.citations?.references || []}
+                              inTextCitations={a.citations?.in_text_citations || []}
+                              onCitationClick={() => setTab('citations')}
+                            />
                           </p>
                         </div>
                       )
@@ -483,18 +553,30 @@ export default function AnalysisPage() {
                 {/* Evidence Inspector Card */}
                 {selectedSentence && (
                   <div className="card p-5 bg-slate-900 border-primary-500/40 shadow-xl space-y-3 mt-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
                       <div className="flex items-center gap-2">
                         <Quote className="w-4 h-4 text-primary-400" />
                         <h3 className="text-sm font-semibold text-white">Source Evidence Inspector</h3>
                         <span className="text-xs px-2 py-0.5 rounded bg-primary-950 text-primary-300 border border-primary-800/50">
                           {selectedSentence.section || 'Body'}
                         </span>
+                        <span className="text-xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/40 font-mono">
+                          Page {selectedSentence.page_number || 1}
+                        </span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={() => {
+                            setSplitView(true)
+                            if (selectedSentence.page_number) setPdfPage(selectedSentence.page_number)
+                          }}
+                          className="btn btn-secondary btn-sm text-xs text-primary-300 hover:text-white flex items-center gap-1 border-primary-700/60"
+                        >
+                          <Columns className="w-3.5 h-3.5 text-primary-400" /> Open in Split Reader
+                        </button>
                         <button
                           onClick={() => setTab('source')}
-                          className="btn btn-ghost btn-sm text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
+                          className="btn btn-ghost btn-sm text-xs text-slate-400 hover:text-slate-300 flex items-center gap-1"
                         >
                           <Eye className="w-3.5 h-3.5" /> Jump to Source Preview
                         </button>
@@ -505,11 +587,20 @@ export default function AnalysisPage() {
                     <div className="space-y-2">
                       <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Exact Source Sentence</p>
                       <blockquote className="p-3 bg-slate-950/60 rounded-lg border-l-2 border-primary-500 text-slate-200 text-sm leading-relaxed italic">
-                        "{selectedSentence.text}"
+                        <CitationPopover
+                          text={`"${selectedSentence.text}"`}
+                          references={a.citations?.references || []}
+                          inTextCitations={a.citations?.in_text_citations || []}
+                          onCitationClick={() => setTab('citations')}
+                        />
                       </blockquote>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-xs">
+                      <div className="p-2.5 bg-slate-800/50 rounded-lg">
+                        <span className="text-slate-500 block mb-0.5">Page Location</span>
+                        <span className="font-mono font-medium text-primary-400">Page {selectedSentence.page_number || 1}</span>
+                      </div>
                       <div className="p-2.5 bg-slate-800/50 rounded-lg">
                         <span className="text-slate-500 block mb-0.5">Original Sentence Index</span>
                         <span className="font-mono font-medium text-slate-200">Sentence #{selectedSentence.index + 1}</span>
@@ -635,7 +726,7 @@ export default function AnalysisPage() {
                       <h3 className="text-sm font-semibold text-white">{dim.label}</h3>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {dim.found ? (
                         <>
                           {dim.section && (
@@ -643,6 +734,20 @@ export default function AnalysisPage() {
                               Section: {dim.section}
                             </span>
                           )}
+                          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-primary-300 border border-slate-700">
+                            Page {dim.page_number || 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (dim.page_number) setPdfPage(dim.page_number)
+                              setSplitView(true)
+                            }}
+                            className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-medium bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/40 hover:bg-emerald-900/60 transition-all"
+                            title="Scroll PDF reader to this dimension finding"
+                          >
+                            <Columns className="w-3 h-3" /> View in Reader
+                          </button>
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/50 uppercase">
                             Identified
                           </span>
@@ -673,7 +778,14 @@ export default function AnalysisPage() {
                           </span>
                           <CopyButton text={dim.evidence} label="Copy Excerpt" />
                         </div>
-                        <p>"{dim.evidence}"</p>
+                        <p>
+                          <CitationPopover
+                            text={`"${dim.evidence}"`}
+                            references={a.citations?.references || []}
+                            inTextCitations={a.citations?.in_text_citations || []}
+                            onCitationClick={() => setTab('citations')}
+                          />
+                        </p>
                       </div>
                     </div>
                   )}
@@ -730,13 +842,24 @@ export default function AnalysisPage() {
                           <h3 className="text-base font-bold text-white">{sec.name}</h3>
                         </div>
 
-                        <div className="flex items-center gap-2 text-xs">
+                        <div className="flex items-center gap-2 text-xs flex-wrap">
                           <span className="font-mono text-slate-400 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
                             {sec.word_count || 0} words
                           </span>
-                          <span className="font-mono text-slate-500 text-[11px]">
-                            Chars: {sec.start_char ?? 0}–{sec.end_char ?? 0}
+                          <span className="font-mono text-primary-300 px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
+                            Page {sec.page_number || 1}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (sec.page_number) setPdfPage(sec.page_number)
+                              setSplitView(true)
+                            }}
+                            className="text-[11px] text-primary-400 hover:text-primary-300 flex items-center gap-1 font-medium bg-primary-950/40 px-2 py-0.5 rounded border border-primary-800/40 hover:bg-primary-900/60 transition-all"
+                            title="Scroll PDF reader to this section"
+                          >
+                            <Columns className="w-3 h-3" /> View in Reader
+                          </button>
                         </div>
                       </div>
 
@@ -784,7 +907,14 @@ export default function AnalysisPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────── */}
-      {/* 5. KEY PHRASES TAB */}
+      {/* 5. CITATIONS & BIBTEX EXPORTER TAB */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {tab === 'citations' && (
+        <CitationsPanel citations={a.citations || {}} paperTitle={a.title} />
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* 6. KEY PHRASES TAB */}
       {/* ──────────────────────────────────────────────────────────── */}
       {tab === 'phrases' && (
         <div className="card p-6 bg-slate-900/80 border-slate-800 space-y-4">
@@ -892,6 +1022,8 @@ export default function AnalysisPage() {
           </div>
         </div>
       )}
+        </div>
+      </div>
     </div>
   )
 }

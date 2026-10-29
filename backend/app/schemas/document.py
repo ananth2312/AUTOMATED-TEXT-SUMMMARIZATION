@@ -55,3 +55,22 @@ class TextInputRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
     text: str = Field(..., min_length=50, description="Minimum 50 characters of text.")
     summary_type: str = Field("medium", pattern="^(concise|medium|detailed)$")
+
+
+class ExternalIngestRequest(BaseModel):
+    """For importing a paper via arXiv ID, arXiv URL, or DOI."""
+    url_or_identifier: str = Field(..., min_length=3, description="arXiv ID, arXiv URL, or DOI")
+    summary_type: str = Field("medium", pattern="^(concise|medium|detailed)$")
+    auto_analyze: bool = True
+
+
+class ExternalMetadataPreview(BaseModel):
+    """Publication metadata fetched before or during ingestion."""
+    source: str
+    identifier: str
+    title: str
+    authors: list[str] = []
+    year: str = ""
+    abstract: str = ""
+    venue: str = ""
+    pdf_url: Optional[str] = None

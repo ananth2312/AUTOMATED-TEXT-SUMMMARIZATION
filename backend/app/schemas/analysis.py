@@ -50,6 +50,8 @@ class DocumentStatistics(BaseModel):
 
 # ── Evidence and Section Summaries ───────────────────────────────────────────
 
+# ── Evidence and Section Summaries ───────────────────────────────────────────
+
 class SummarySentenceEvidence(BaseModel):
     index: int
     text: str
@@ -57,6 +59,7 @@ class SummarySentenceEvidence(BaseModel):
     start_char: int
     end_char: int
     section: str
+    page_number: Optional[int] = None
 
 
 class SectionSummary(BaseModel):
@@ -66,6 +69,7 @@ class SectionSummary(BaseModel):
     start_char: int
     end_char: int
     sentences: list[SummarySentenceEvidence] = []
+    page_number: Optional[int] = None
 
 
 class ExtractedDimensionSchema(BaseModel):
@@ -77,12 +81,56 @@ class ExtractedDimensionSchema(BaseModel):
     section: Optional[str] = None
     char_start: Optional[int] = None
     char_end: Optional[int] = None
+    page_number: Optional[int] = None
 
 
 class MethodologyFindings(BaseModel):
     dimensions: list[ExtractedDimensionSchema]
     total_found: int
     total_dimensions: int
+
+
+# ── Citation Intelligence ────────────────────────────────────────────────────
+
+class ParsedReferenceSchema(BaseModel):
+    id: str
+    raw_text: str
+    authors: list[str] = []
+    title: str = ""
+    year: str = ""
+    venue: str = ""
+    doi: str = ""
+    url: str = ""
+    bibtex: str = ""
+    apa: str = ""
+    ieee: str = ""
+    mla: str = ""
+
+
+class InTextCitationSchema(BaseModel):
+    marker: str
+    start_char: int
+    end_char: int
+    ref_ids: list[str] = []
+    matched_references: list[dict] = []
+
+
+class PaperSelfCitationSchema(BaseModel):
+    title: str
+    authors: list[str] = []
+    year: str = ""
+    venue: str = ""
+    bibtex: str = ""
+    apa: str = ""
+    ieee: str = ""
+    mla: str = ""
+
+
+class CitationIntelligence(BaseModel):
+    total_references: int
+    references: list[ParsedReferenceSchema] = []
+    in_text_citations: list[InTextCitationSchema] = []
+    paper_citation: Optional[PaperSelfCitationSchema] = None
 
 
 # ── Analysis result ───────────────────────────────────────────────────────────
@@ -106,12 +154,14 @@ class AnalysisResult(BaseModel):
     source_text_preview: Optional[str] = None  # first 500 chars
     created_at: datetime
 
-    # New Stage 1 features
+    # Stage 1 & Stage 2 features
     summary_sentences_with_evidence: Optional[list[SummarySentenceEvidence]] = None
     section_summaries: Optional[list[SectionSummary]] = None
     methodology_findings: Optional[MethodologyFindings] = None
+    citations: Optional[CitationIntelligence] = None
 
     model_config = {"populate_by_name": True}
+
 
 
 class AnalysisListItem(BaseModel):

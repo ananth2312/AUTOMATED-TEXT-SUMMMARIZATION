@@ -13,6 +13,7 @@ Saves the result to MongoDB and returns the persisted document.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -22,9 +23,12 @@ from pymongo.database import Database
 from app.config import get_settings
 from app.nlp import (
     compute_statistics,
+    detect_in_text_citations,
     detect_sections,
     extract_key_phrases,
     extract_methodology_and_findings,
+    extract_references_from_text,
+    format_paper_self_citation,
     generate_section_summaries,
     preprocess,
     summarize_with_evidence,
@@ -39,6 +43,7 @@ _ALGORITHM_VERSIONS = {
     "keyword_extractor": "yake-1.0",
     "section_detector": "regex-heuristic-1.0",
     "methodology_extractor": "heuristic-pattern-1.0",
+    "citation_parser": "academic-citation-intel-1.0",
 }
 
 
@@ -60,6 +65,28 @@ def _locate_spans(text: str, sentences: list[str]) -> list[tuple[int, int]]:
             else:
                 spans.append((0, 0))
     return spans
+
+
+def _compute_page_offsets(raw_text: str) -> list[int]:
+    """Returns list of starting character offsets for each page in raw_text."""
+    breaks = [0]
+    for m in re.finditer(r"\s*---\s*PAGE BREAK\s*---\s*", raw_text, re.IGNORECASE):
+        breaks.append(m.end())
+    return breaks
+
+
+def _find_page(raw_text: str, page_breaks: list[int], sent_text: str, fallback_char: int = 0) -> int:
+    """Estimates the 1-indexed page number of an evidence sentence in raw_text."""
+    if not page_breaks or len(page_breaks) <= 1:
+        return 1
+    prefix = sent_text[:35].strip()
+    pos = raw_text.find(prefix) if prefix else -1
+    target = pos if pos != -1 else fallback_char
+    for i in range(len(page_breaks) - 1, -1, -1):
+        if target >= page_breaks[i]:
+            return i + 1
+    return 1
+
 
 
 def run_analysis(
@@ -142,13 +169,52 @@ def run_analysis(
         sentence_spans=sentence_spans,
     )
 
-    # ── 6. Key-phrase extraction ───────────────────────────────────────────
+    # ── 6. Page mapping for split-screen evidence sync ─────────────────────
+    page_breaks = _compute_page_offsets(raw_text)
+    for level, ev_list in evidence_map.items():
+        for ev in ev_list:
+            if isinstance(ev, dict):
+                ev["page_number"] = _find_page(raw_text, page_breaks, ev.get("text", ""), ev.get("start_char", 0))
+
+    for sec_sum in section_summaries:
+        sec_sum["page_number"] = _find_page(raw_text, page_breaks, sec_sum.get("summary_text", "")[:40], sec_sum.get("start_char", 0))
+        for ev in sec_sum.get("sentences", []):
+            if isinstance(ev, dict):
+                ev["page_number"] = _find_page(raw_text, page_breaks, ev.get("text", ""), ev.get("start_char", 0))
+
+    meth_dict = methodology_res.to_dict()
+    for dim in meth_dict.get("dimensions", []):
+        ev_text = dim.get("evidence") or dim.get("summary") or ""
+        dim["page_number"] = _find_page(raw_text, page_breaks, ev_text[:35], dim.get("char_start") or 0)
+
+    # ── 7. Key-phrase extraction ───────────────────────────────────────────
     phrases = extract_key_phrases(
         preprocessed.clean_text,
         max_phrases=settings.MAX_KEY_PHRASES,
     )
 
-    # ── 7. Statistics ──────────────────────────────────────────────────────
+    # ── 8. Citation Intelligence & BibTeX ─────────────────────────────────
+    doc_meta = None
+    if document_id:
+        try:
+            doc_rec = db.documents.find_one({"_id": ObjectId(document_id)})
+            if doc_rec:
+                doc_meta = doc_rec.get("pdf_metadata")
+        except Exception:
+            pass
+
+    parsed_refs = extract_references_from_text(preprocessed.clean_text, sections)
+    in_text_cites = detect_in_text_citations(preprocessed.clean_text, parsed_refs)
+    self_citation = format_paper_self_citation(title, doc_meta)
+
+    citations_payload = {
+        "total_references": len(parsed_refs),
+        "references": [r.to_dict() for r in parsed_refs],
+        "in_text_citations": in_text_cites,
+        "paper_citation": self_citation,
+    }
+
+    # ── 9. Statistics ──────────────────────────────────────────────────────
     stats = compute_statistics(
         text=preprocessed.clean_text,
         summary_text=requested_summary,
@@ -157,7 +223,7 @@ def run_analysis(
         words_per_minute=settings.WORDS_PER_MINUTE,
     )
 
-    # ── 8. Persist to MongoDB ─────────────────────────────────────────────
+    # ── 10. Persist to MongoDB ────────────────────────────────────────────
     now = datetime.now(timezone.utc)
     analysis_doc = {
         "user_id": ObjectId(user_id),
@@ -171,7 +237,8 @@ def run_analysis(
         "summary_sentences_with_evidence": evidence_map.get(summary_type, evidence_map.get("medium", [])),
         "evidence_by_level": evidence_map,
         "section_summaries": section_summaries,
-        "methodology_findings": methodology_res.to_dict(),
+        "methodology_findings": meth_dict,
+        "citations": citations_payload,
         "key_phrases": [
             {"phrase": p.phrase, "score": p.score, "rank": p.rank}
             for p in phrases
@@ -201,12 +268,14 @@ def run_analysis(
         analysis_doc["document_id"] = document_id
 
     logger.info(
-        "Analysis %s saved for user %s (summary_type=%s, phrases=%d, sections=%d, findings=%d)",
+        "Analysis %s saved for user %s (summary_type=%s, phrases=%d, sections=%d, findings=%d, citations=%d)",
         analysis_doc["_id"],
         user_id,
         summary_type,
         len(phrases),
         len(section_summaries),
         methodology_res.total_found,
+        len(parsed_refs),
     )
     return analysis_doc
+

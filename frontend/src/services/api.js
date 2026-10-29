@@ -50,10 +50,14 @@ export const documentsApi = {
   upload: (formData) => api.post('/documents/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
+  importExternal: (data) => api.post('/documents/import-external', data),
+  previewExternal: (data) => api.post('/documents/preview-external', data),
+  getPdfBlob: (id) => api.get(`/documents/${id}/pdf`, { responseType: 'blob' }),
   list:   (params) => api.get('/documents', { params }),
   get:    (id)     => api.get(`/documents/${id}`),
   delete: (id)     => api.delete(`/documents/${id}`),
 }
+
 
 export const analysesApi = {
   analyzeText:     (data)          => api.post('/analyses/text', data),
